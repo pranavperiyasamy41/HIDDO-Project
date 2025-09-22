@@ -1,0 +1,200 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// Session storage - required for Replit Auth
+model Session {
+  sid    String   @id @map("_id")
+  sess   Json
+  expire DateTime
+
+  @@index([expire])
+  @@map("sessions")
+}
+
+// User storage - required for Replit Auth
+model User {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  email           String?   @unique
+  firstName       String?
+  lastName        String?
+  profileImageUrl String?
+  username        String?   @unique
+  displayName     String?
+  bio             String?
+  location        String?
+  gender          String?
+  isVerified      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  posts         Post[]
+  stories       Story[]
+  comments      Comment[]
+  likes         Like[]
+  saves         Save[]
+  storyViews    StoryView[]
+  notifications Notification[]
+  
+  // Explorer relationships
+  followers     Explorer[] @relation("UserFollowers")
+  following     Explorer[] @relation("UserFollowing")
+
+  @@map("users")
+}
+
+model Post {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId
+  title        String
+  description  String?
+  location     String?
+  latitude     Float?
+  longitude    Float?
+  categories   String[]
+  imageUrls    String[]
+  musicUrl     String?
+  visibility   String   @default("everyone") // everyone, explorers, private
+  likeCount    Int      @default(0)
+  commentCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments Comment[]
+  likes    Like[]
+  saves    Save[]
+
+  @@index([userId])
+  @@map("posts")
+}
+
+model Story {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String    @db.ObjectId
+  mediaUrl  String
+  mediaType String    // image, video
+  location  String?
+  latitude  Float?
+  longitude Float?
+  viewCount Int       @default(0)
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  // Relations
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  views StoryView[]
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("stories")
+}
+
+model Comment {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  postId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  content   String
+  parentId  String?  @db.ObjectId
+  createdAt DateTime @default(now())
+
+  // Relations
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies Comment[] @relation("CommentReplies")
+
+  @@index([postId])
+  @@index([userId])
+  @@index([parentId])
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  postId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@map("likes")
+}
+
+model Explorer {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  followerId  String   @db.ObjectId
+  followingId String   @db.ObjectId
+  status      String   @default("pending") // pending, accepted, blocked
+  createdAt   DateTime @default(now())
+
+  // Relations
+  follower  User @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("explorers")
+}
+
+model Save {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  postId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@map("saves")
+}
+
+model StoryView {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  storyId   String   @db.ObjectId
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  // Relations
+  story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId])
+  @@index([storyId])
+  @@index([userId])
+  @@map("story_views")
+}
+
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  type      String   // like, comment, explorer_request, story_view
+  title     String
+  message   String
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
