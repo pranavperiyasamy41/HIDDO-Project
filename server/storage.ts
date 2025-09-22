@@ -1,13 +1,4 @@
 import {
-  users,
-  posts,
-  stories,
-  comments,
-  likes,
-  explorers,
-  saves,
-  storyViews,
-  notifications,
   type User,
   type UpsertUser,
   type Post,
@@ -24,8 +15,19 @@ import {
   type InsertSave,
   type Notification,
   type InsertNotification,
+  type StoryView,
+  type InsertStoryView,
 } from "@shared/schema";
+import { PrismaClient } from "../generated/prisma";
 import { randomUUID } from "crypto";
+
+const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: "mongodb://localhost:27017/myapp"
+    }
+  }
+});
 
 export interface IStorage {
   // User operations - required for Replit Auth
@@ -74,339 +76,397 @@ export interface IStorage {
   markAllNotificationsRead(userId: string): Promise<boolean>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User> = new Map();
-  private posts: Map<string, Post> = new Map();
-  private stories: Map<string, Story> = new Map();
-  private comments: Map<string, Comment> = new Map();
-  private likes: Map<string, Like> = new Map();
-  private explorers: Map<string, Explorer> = new Map();
-  private saves: Map<string, Save> = new Map();
-  private storyViews: Map<string, any> = new Map();
-  private notifications: Map<string, Notification> = new Map();
-
+export class PrismaStorage implements IStorage {
   // User operations
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const user = await prisma.user.findUnique({
+      where: { id }
+    });
+    return user || undefined;
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const existingUser = Array.from(this.users.values()).find(u => u.id === userData.id);
-    
-    if (existingUser) {
-      const updated = { ...existingUser, ...userData, updatedAt: new Date() };
-      this.users.set(existingUser.id, updated);
-      return updated;
-    } else {
-      const id = userData.id || randomUUID();
-      const user: User = {
+    const user = await prisma.user.upsert({
+      where: { externalId: userData.id || "" },
+      update: {
         ...userData,
-        id,
-        email: userData.email || null,
-        firstName: userData.firstName || null,
-        lastName: userData.lastName || null,
-        profileImageUrl: userData.profileImageUrl || null,
-        username: userData.username || null,
-        displayName: userData.displayName || null,
-        bio: userData.bio || null,
-        location: userData.location || null,
-        gender: userData.gender || null,
-        isVerified: userData.isVerified || false,
+        updatedAt: new Date(),
+      },
+      create: {
+        id: userData.id || crypto.randomUUID(),
+        externalId: userData.id,
+        ...userData,
         createdAt: new Date(),
         updatedAt: new Date(),
-      };
-      this.users.set(id, user);
-      return user;
-    }
+      }
+    });
+    return user;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.username === username);
+    const user = await prisma.user.findUnique({
+      where: { username }
+    });
+    return user || undefined;
   }
 
   // Post operations
   async createPost(postData: InsertPost): Promise<Post> {
-    const id = randomUUID();
-    const post: Post = {
-      ...postData,
-      id,
-      description: postData.description || null,
-      location: postData.location || null,
-      latitude: postData.latitude || null,
-      longitude: postData.longitude || null,
-      categories: postData.categories || null,
-      musicUrl: postData.musicUrl || null,
-      likeCount: 0,
-      commentCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    this.posts.set(id, post);
+    const post = await prisma.post.create({
+      data: {
+        id: randomUUID(),
+        ...postData,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    });
     return post;
   }
 
   async getPost(id: string): Promise<Post | undefined> {
-    return this.posts.get(id);
+    const post = await prisma.post.findUnique({
+      where: { id }
+    });
+    return post || undefined;
   }
 
   async getUserPosts(userId: string): Promise<Post[]> {
-    return Array.from(this.posts.values())
-      .filter(post => post.userId === userId)
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime());
+    return await prisma.post.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" }
+    });
   }
 
   async getFeedPosts(userId: string, limit = 20): Promise<Post[]> {
-    // Get posts from user's explorers and own posts
-    const userExplorers = await this.getUserFollowing(userId);
-    const explorerIds = userExplorers.map(u => u.id);
-    explorerIds.push(userId);
-
-    return Array.from(this.posts.values())
-      .filter(post => explorerIds.includes(post.userId) && post.visibility !== 'private')
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime())
-      .slice(0, limit);
+    return await prisma.post.findMany({
+      where: {
+        OR: [
+          { userId },
+          { visibility: "everyone" }
+        ]
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit
+    });
   }
 
   async getNearbyPosts(latitude: number, longitude: number, radiusKm = 10): Promise<Post[]> {
-    return Array.from(this.posts.values())
-      .filter(post => {
-        if (!post.latitude || !post.longitude) return false;
-        // Simple distance calculation (not perfectly accurate but good enough for demo)
-        const latDiff = Math.abs(post.latitude - latitude);
-        const lonDiff = Math.abs(post.longitude - longitude);
-        const distance = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111; // Rough km conversion
-        return distance <= radiusKm;
-      })
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime());
+    // Simple proximity query - in production, you'd use MongoDB geospatial queries
+    return await prisma.post.findMany({
+      where: {
+        AND: [
+          { latitude: { not: null } },
+          { longitude: { not: null } }
+        ]
+      },
+      orderBy: { createdAt: "desc" }
+    });
   }
 
   async updatePost(id: string, updates: Partial<Post>): Promise<Post | undefined> {
-    const post = this.posts.get(id);
-    if (!post) return undefined;
-    
-    const updated = { ...post, ...updates, updatedAt: new Date() };
-    this.posts.set(id, updated);
-    return updated;
+    try {
+      const post = await prisma.post.update({
+        where: { id },
+        data: {
+          ...updates,
+          updatedAt: new Date(),
+        }
+      });
+      return post;
+    } catch {
+      return undefined;
+    }
   }
 
   async deletePost(id: string): Promise<boolean> {
-    return this.posts.delete(id);
+    try {
+      await prisma.post.delete({
+        where: { id }
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // Story operations
   async createStory(storyData: InsertStory): Promise<Story> {
-    const id = randomUUID();
-    const story: Story = {
-      ...storyData,
-      id,
-      viewCount: 0,
-      createdAt: new Date(),
-    };
-    this.stories.set(id, story);
+    const story = await prisma.story.create({
+      data: {
+        id: randomUUID(),
+        ...storyData,
+        createdAt: new Date(),
+      }
+    });
     return story;
   }
 
   async getUserStories(userId: string): Promise<Story[]> {
-    const now = new Date();
-    return Array.from(this.stories.values())
-      .filter(story => story.userId === userId && story.expiresAt > now)
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime());
+    return await prisma.story.findMany({
+      where: { 
+        userId,
+        expiresAt: { gte: new Date() }
+      },
+      orderBy: { createdAt: "desc" }
+    });
   }
 
   async getActiveStories(): Promise<Story[]> {
-    const now = new Date();
-    return Array.from(this.stories.values())
-      .filter(story => story.expiresAt > now)
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime());
+    return await prisma.story.findMany({
+      where: {
+        expiresAt: { gte: new Date() }
+      },
+      orderBy: { createdAt: "desc" }
+    });
   }
 
   async deleteExpiredStories(): Promise<void> {
-    const now = new Date();
-    Array.from(this.stories.entries()).forEach(([id, story]) => {
-      if (story.expiresAt <= now) {
-        this.stories.delete(id);
+    await prisma.story.deleteMany({
+      where: {
+        expiresAt: { lt: new Date() }
       }
     });
   }
 
   // Social interactions
   async createLike(likeData: InsertLike): Promise<Like> {
-    const id = randomUUID();
-    const like: Like = {
-      ...likeData,
-      id,
-      createdAt: new Date(),
-    };
-    this.likes.set(id, like);
+    const like = await prisma.like.create({
+      data: {
+        id: randomUUID(),
+        ...likeData,
+        createdAt: new Date(),
+      }
+    });
     
     // Update post like count
-    const post = this.posts.get(likeData.postId);
-    if (post) {
-      await this.updatePost(post.id, { likeCount: (post.likeCount || 0) + 1 });
-    }
+    await prisma.post.update({
+      where: { id: likeData.postId },
+      data: {
+        likeCount: { increment: 1 }
+      }
+    });
     
     return like;
   }
 
   async removeLike(userId: string, postId: string): Promise<boolean> {
-    const like = Array.from(this.likes.values())
-      .find(l => l.userId === userId && l.postId === postId);
-    
-    if (!like) return false;
-    
-    this.likes.delete(like.id);
-    
-    // Update post like count
-    const post = this.posts.get(postId);
-    if (post && post.likeCount! > 0) {
-      await this.updatePost(post.id, { likeCount: post.likeCount! - 1 });
+    try {
+      await prisma.like.delete({
+        where: {
+          userId_postId: {
+            userId,
+            postId
+          }
+        }
+      });
+      
+      // Update post like count
+      await prisma.post.update({
+        where: { id: postId },
+        data: {
+          likeCount: { decrement: 1 }
+        }
+      });
+      
+      return true;
+    } catch {
+      return false;
     }
-    
-    return true;
   }
 
   async getUserLike(userId: string, postId: string): Promise<Like | undefined> {
-    return Array.from(this.likes.values())
-      .find(like => like.userId === userId && like.postId === postId);
+    const like = await prisma.like.findUnique({
+      where: {
+        userId_postId: {
+          userId,
+          postId
+        }
+      }
+    });
+    return like || undefined;
   }
 
   async createComment(commentData: InsertComment): Promise<Comment> {
-    const id = randomUUID();
-    const comment: Comment = {
-      ...commentData,
-      id,
-      createdAt: new Date(),
-    };
-    this.comments.set(id, comment);
+    const comment = await prisma.comment.create({
+      data: {
+        id: randomUUID(),
+        ...commentData,
+        createdAt: new Date(),
+      }
+    });
     
     // Update post comment count
-    const post = this.posts.get(commentData.postId);
-    if (post) {
-      await this.updatePost(post.id, { commentCount: (post.commentCount || 0) + 1 });
-    }
+    await prisma.post.update({
+      where: { id: commentData.postId },
+      data: {
+        commentCount: { increment: 1 }
+      }
+    });
     
     return comment;
   }
 
   async getPostComments(postId: string): Promise<Comment[]> {
-    return Array.from(this.comments.values())
-      .filter(comment => comment.postId === postId)
-      .sort((a, b) => a.createdAt!.getTime() - b.createdAt!.getTime());
+    return await prisma.comment.findMany({
+      where: { postId },
+      orderBy: { createdAt: "asc" }
+    });
   }
 
   async createExplorerConnection(explorerData: InsertExplorer): Promise<Explorer> {
-    const id = randomUUID();
-    const explorer: Explorer = {
-      ...explorerData,
-      id,
-      createdAt: new Date(),
-    };
-    this.explorers.set(id, explorer);
+    const explorer = await prisma.explorer.create({
+      data: {
+        id: randomUUID(),
+        ...explorerData,
+        createdAt: new Date(),
+      }
+    });
     return explorer;
   }
 
   async getExplorerConnection(followerId: string, followingId: string): Promise<Explorer | undefined> {
-    return Array.from(this.explorers.values())
-      .find(e => e.followerId === followerId && e.followingId === followingId);
+    const explorer = await prisma.explorer.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId,
+          followingId
+        }
+      }
+    });
+    return explorer || undefined;
   }
 
   async getUserExplorers(userId: string): Promise<User[]> {
-    const explorerConnections = Array.from(this.explorers.values())
-      .filter(e => e.followingId === userId && e.status === 'accepted');
-    
-    const explorerIds = explorerConnections.map(e => e.followerId);
-    return Array.from(this.users.values()).filter(user => explorerIds.includes(user.id));
+    const explorers = await prisma.explorer.findMany({
+      where: {
+        followingId: userId,
+        status: "accepted"
+      },
+      include: {
+        follower: true
+      }
+    });
+    return explorers.map(e => e.follower);
   }
 
   async getUserFollowing(userId: string): Promise<User[]> {
-    const followingConnections = Array.from(this.explorers.values())
-      .filter(e => e.followerId === userId && e.status === 'accepted');
-    
-    const followingIds = followingConnections.map(e => e.followingId);
-    return Array.from(this.users.values()).filter(user => followingIds.includes(user.id));
+    const following = await prisma.explorer.findMany({
+      where: {
+        followerId: userId,
+        status: "accepted"
+      },
+      include: {
+        following: true
+      }
+    });
+    return following.map(f => f.following);
   }
 
   async getPendingExplorerRequests(userId: string): Promise<Explorer[]> {
-    return Array.from(this.explorers.values())
-      .filter(e => e.followingId === userId && e.status === 'pending');
+    return await prisma.explorer.findMany({
+      where: {
+        followingId: userId,
+        status: "pending"
+      }
+    });
   }
 
   async updateExplorerStatus(id: string, status: string): Promise<Explorer | undefined> {
-    const explorer = this.explorers.get(id);
-    if (!explorer) return undefined;
-    
-    const updated = { ...explorer, status };
-    this.explorers.set(id, updated);
-    return updated;
+    try {
+      const explorer = await prisma.explorer.update({
+        where: { id },
+        data: { status }
+      });
+      return explorer;
+    } catch {
+      return undefined;
+    }
   }
 
   async createSave(saveData: InsertSave): Promise<Save> {
-    const id = randomUUID();
-    const save: Save = {
-      ...saveData,
-      id,
-      createdAt: new Date(),
-    };
-    this.saves.set(id, save);
+    const save = await prisma.save.create({
+      data: {
+        id: randomUUID(),
+        ...saveData,
+        createdAt: new Date(),
+      }
+    });
     return save;
   }
 
   async removeSave(userId: string, postId: string): Promise<boolean> {
-    const save = Array.from(this.saves.values())
-      .find(s => s.userId === userId && s.postId === postId);
-    
-    if (!save) return false;
-    return this.saves.delete(save.id);
+    try {
+      await prisma.save.delete({
+        where: {
+          userId_postId: {
+            userId,
+            postId
+          }
+        }
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getUserSaves(userId: string): Promise<Post[]> {
-    const userSaves = Array.from(this.saves.values())
-      .filter(save => save.userId === userId);
-    
-    const postIds = userSaves.map(save => save.postId);
-    return Array.from(this.posts.values())
-      .filter(post => postIds.includes(post.id))
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime());
+    const saves = await prisma.save.findMany({
+      where: { userId },
+      include: {
+        post: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    return saves.map(s => s.post);
   }
 
   // Notifications
   async createNotification(notificationData: InsertNotification): Promise<Notification> {
-    const id = randomUUID();
-    const notification: Notification = {
-      ...notificationData,
-      id,
-      createdAt: new Date(),
-    };
-    this.notifications.set(id, notification);
+    const notification = await prisma.notification.create({
+      data: {
+        id: randomUUID(),
+        ...notificationData,
+        data: notificationData.data || {},
+        createdAt: new Date(),
+      }
+    });
     return notification;
   }
 
   async getUserNotifications(userId: string): Promise<Notification[]> {
-    return Array.from(this.notifications.values())
-      .filter(notification => notification.userId === userId)
-      .sort((a, b) => b.createdAt!.getTime() - a.createdAt!.getTime());
+    return await prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" }
+    });
   }
 
   async markNotificationRead(id: string): Promise<boolean> {
-    const notification = this.notifications.get(id);
-    if (!notification) return false;
-    
-    const updated = { ...notification, isRead: true };
-    this.notifications.set(id, updated);
-    return true;
+    try {
+      await prisma.notification.update({
+        where: { id },
+        data: { isRead: true }
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async markAllNotificationsRead(userId: string): Promise<boolean> {
-    const userNotifications = Array.from(this.notifications.values())
-      .filter(n => n.userId === userId && !n.isRead);
-    
-    userNotifications.forEach(notification => {
-      const updated = { ...notification, isRead: true };
-      this.notifications.set(notification.id, updated);
-    });
-    
-    return true;
+    try {
+      await prisma.notification.updateMany({
+        where: { 
+          userId,
+          isRead: false 
+        },
+        data: { isRead: true }
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new PrismaStorage();

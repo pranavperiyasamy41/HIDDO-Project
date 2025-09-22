@@ -23,7 +23,8 @@ model Session {
 
 // User storage - required for Replit Auth
 model User {
-  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  id              String    @id @map("_id")
+  externalId      String?   @unique // OIDC sub claim
   email           String?   @unique
   firstName       String?
   lastName        String?
@@ -54,8 +55,8 @@ model User {
 }
 
 model Post {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId       String   @db.ObjectId
+  id           String   @id @map("_id")
+  userId       String
   title        String
   description  String?
   location     String?
@@ -81,8 +82,8 @@ model Post {
 }
 
 model Story {
-  id        String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String    @db.ObjectId
+  id        String    @id @map("_id")
+  userId    String
   mediaUrl  String
   mediaType String    // image, video
   location  String?
@@ -102,11 +103,11 @@ model Story {
 }
 
 model Comment {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  postId    String   @db.ObjectId
-  userId    String   @db.ObjectId
+  id        String   @id @map("_id")
+  postId    String
+  userId    String
   content   String
-  parentId  String?  @db.ObjectId
+  parentId  String?
   createdAt DateTime @default(now())
 
   // Relations
@@ -122,9 +123,9 @@ model Comment {
 }
 
 model Like {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String   @db.ObjectId
-  postId    String   @db.ObjectId
+  id        String   @id @map("_id")
+  userId    String
+  postId    String
   createdAt DateTime @default(now())
 
   // Relations
@@ -136,9 +137,9 @@ model Like {
 }
 
 model Explorer {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  followerId  String   @db.ObjectId
-  followingId String   @db.ObjectId
+  id          String   @id @map("_id")
+  followerId  String
+  followingId String
   status      String   @default("pending") // pending, accepted, blocked
   createdAt   DateTime @default(now())
 
@@ -153,9 +154,9 @@ model Explorer {
 }
 
 model Save {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String   @db.ObjectId
-  postId    String   @db.ObjectId
+  id        String   @id @map("_id")
+  userId    String
+  postId    String
   createdAt DateTime @default(now())
 
   // Relations
@@ -167,9 +168,9 @@ model Save {
 }
 
 model StoryView {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  storyId   String   @db.ObjectId
-  userId    String   @db.ObjectId
+  id        String   @id @map("_id")
+  storyId   String
+  userId    String
   createdAt DateTime @default(now())
 
   // Relations
@@ -183,8 +184,8 @@ model StoryView {
 }
 
 model Notification {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String   @db.ObjectId
+  id        String   @id @map("_id")
+  userId    String
   type      String   // like, comment, explorer_request, story_view
   title     String
   message   String
