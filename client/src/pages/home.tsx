@@ -145,7 +145,7 @@ export default function Home() {
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <i className="fas fa-compass text-primary-foreground"></i>
             </div>
-            <span className="text-xl font-bold text-primary">Explorer</span>
+            <span className="text-xl font-bold text-primary">Hiddo</span>
           </div>
           
           <div className="flex items-center space-x-4">

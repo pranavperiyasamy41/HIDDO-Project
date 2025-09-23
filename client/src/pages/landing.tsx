@@ -28,7 +28,7 @@ export default function Landing() {
             <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
               <i className="fas fa-compass text-primary-foreground text-xl"></i>
             </div>
-            <span className="text-2xl font-bold text-primary">Explorer</span>
+            <span className="text-2xl font-bold text-primary">Hiddo</span>
           </div>
           
           <div className="flex items-center space-x-4">
@@ -63,10 +63,11 @@ export default function Landing() {
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="text-center lg:text-left">
               <h1 className="text-5xl lg:text-6xl font-bold mb-6 bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
-                Discover the World Through Stories
+                Turn Moments Into Memories
+Hiddo
               </h1>
               <p className="text-xl text-muted-foreground mb-8 leading-relaxed">
-                Connect with fellow explorers, share your adventures, and discover hidden gems in your city and beyond. Every location tells a story.
+                Capture moments, share journeys, explore together
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                 <Button
@@ -207,7 +208,7 @@ export default function Landing() {
               <i className="fas fa-compass text-primary-foreground text-2xl"></i>
             </div>
             <DialogTitle className="text-2xl font-bold">
-              {authMode === 'login' ? 'Welcome Back' : 'Join Explorer'}
+              {authMode === 'login' ? 'Welcome Back' : 'Join Hiddo'}
             </DialogTitle>
             <p className="text-muted-foreground">
               {authMode === 'login' 

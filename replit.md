@@ -1,8 +1,8 @@
-# Social Explorer Platform
+# Hiddo Platform
 
 ## Overview
 
-The Social Explorer Platform is a mobile-first social exploration application that combines location-based content sharing with real-world discovery. Users can create posts tied to specific locations, share stories, discover nearby content, and connect with fellow explorers. The platform features a clean, modern interface with both dark and light modes, progressive web app capabilities, and comprehensive social features including likes, comments, saves, and real-time notifications.
+Hiddo is a mobile-first social exploration application that combines location-based content sharing with real-world discovery. Users can create posts tied to specific locations, share stories, discover nearby content, and connect with fellow explorers. The platform features a clean, modern interface with both dark and light modes, progressive web app capabilities, and comprehensive social features including likes, comments, saves, and real-time notifications.
 
 ## User Preferences
 
