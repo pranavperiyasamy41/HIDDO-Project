@@ -5,10 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { useTheme } from "@/components/theme-provider";
 
 export default function Landing() {
   const [authModal, setAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const { theme, toggleTheme } = useTheme();
 
   const handleAuth = (provider: 'google' | 'email') => {
     if (provider === 'google') {
@@ -32,6 +34,19 @@ export default function Landing() {
           </div>
           
           <div className="flex items-center space-x-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleTheme}
+              data-testid="button-theme-toggle"
+              className="p-2"
+            >
+              {theme === 'dark' ? (
+                <i className="fas fa-sun text-lg"></i>
+              ) : (
+                <i className="fas fa-moon text-lg"></i>
+              )}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
