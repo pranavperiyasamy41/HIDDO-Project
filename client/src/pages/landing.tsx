@@ -64,9 +64,9 @@ export default function Landing() {
                 setAuthMode('signup');
                 setAuthModal(true);
               }}
-              data-testid="button-get-started"
+              data-testid="button-signup"
             >
-              Get Started
+              Signup
             </Button>
           </div>
         </nav>
@@ -87,23 +87,13 @@ Hiddo
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                 <Button
                   size="lg"
-                  onClick={() => handleAuth('google')}
-                  className="flex items-center space-x-2"
-                  data-testid="button-google-auth"
-                >
-                  <i className="fab fa-google"></i>
-                  <span>Continue with Google</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="lg"
                   onClick={() => {
                     setAuthMode('signup');
                     setAuthModal(true);
                   }}
-                  data-testid="button-create-account"
+                  data-testid="button-get-started"
                 >
-                  Create Account
+                  Get Started
                 </Button>
               </div>
             </div>
