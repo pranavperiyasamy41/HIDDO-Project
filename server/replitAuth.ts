@@ -5,7 +5,7 @@ import passport from "passport";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
-import MemoryStore from "memorystore";
+import connectPg from "connect-pg-simple";
 import { storage } from "./storage";
 
 if (!process.env.REPLIT_DOMAINS) {
@@ -23,18 +23,24 @@ const getOidcConfig = memoize(
 );
 
 export function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  const sessionStore = MemoryStore(session);
+  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week in milliseconds
+  const sessionTtlSeconds = Math.floor(sessionTtl / 1000); // Convert to seconds for connect-pg-simple
+  const pgStore = connectPg(session);
+  const sessionStore = new pgStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: true,
+    ttl: sessionTtlSeconds,
+    tableName: "sessions",
+  });
   return session({
     secret: process.env.SESSION_SECRET!,
-    store: new sessionStore({
-      checkPeriod: sessionTtl, // prune expired entries every 24h
-    }),
+    store: sessionStore,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: "auto",
+      sameSite: "lax",
       maxAge: sessionTtl,
     },
   });
