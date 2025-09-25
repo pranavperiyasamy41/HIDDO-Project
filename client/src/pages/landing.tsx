@@ -6,19 +6,82 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { useTheme } from "@/components/theme-provider";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+// Form schemas
+const signupSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  firstName: z.string().min(1, "First name is required").optional(),
+  lastName: z.string().min(1, "Last name is required").optional(),
+});
+
+type SignupForm = z.infer<typeof signupSchema>;
 
 export default function Landing() {
   const [authModal, setAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [emailSent, setEmailSent] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const { toast } = useToast();
+
+  const form = useForm<SignupForm>({
+    resolver: zodResolver(signupSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+      firstName: "",
+      lastName: "",
+    },
+  });
+
+  const signupMutation = useMutation({
+    mutationFn: async (data: SignupForm) => {
+      const response = await apiRequest("POST", "/api/auth/signup-email", data);
+      return response.json();
+    },
+    onSuccess: (response: any) => {
+      setEmailSent(true);
+      toast({
+        title: "Verification email sent!",
+        description: response.message,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Signup failed",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleAuth = (provider: 'google' | 'email') => {
     if (provider === 'google') {
       window.location.href = '/api/login';
-    } else {
-      // For email auth, we'll still redirect to Replit auth for simplicity
+    } else if (authMode === 'login') {
+      // For login, still use Replit auth for now
       window.location.href = '/api/login';
     }
+  };
+
+  const onSubmit = (data: SignupForm) => {
+    if (authMode === 'signup') {
+      signupMutation.mutate(data);
+    }
+  };
+
+  const resetModal = () => {
+    setAuthModal(false);
+    setEmailSent(false);
+    form.reset();
+    setAuthMode('login');
   };
 
   return (
