@@ -89,6 +89,21 @@ export const insertStoryViewSchema = z.object({
   userId: z.string(),
 });
 
+export const insertVerificationTokenSchema = z.object({
+  email: z.string().email(),
+  token: z.string(),
+  type: z.enum(["email_verification", "password_reset"]).default("email_verification"),
+  expiresAt: z.coerce.date(),
+});
+
+export const insertPendingUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  isVerified: z.boolean().default(false),
+});
+
 // Export types
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
 export type User = PrismaUser;
@@ -109,3 +124,25 @@ export type Notification = PrismaNotification;
 export type InsertStoryView = z.infer<typeof insertStoryViewSchema>;
 export type StoryView = PrismaStoryView;
 export type Session = PrismaSession;
+export type InsertVerificationToken = z.infer<typeof insertVerificationTokenSchema>;
+export type InsertPendingUser = z.infer<typeof insertPendingUserSchema>;
+
+// Simple types for verification tokens and pending users (since not in Prisma)
+export interface VerificationToken {
+  id: string;
+  email: string;
+  token: string;
+  type: "email_verification" | "password_reset";
+  expiresAt: Date;
+  createdAt: Date;
+}
+
+export interface PendingUser {
+  id: string;
+  email: string;
+  passwordHash: string;
+  firstName?: string;
+  lastName?: string;
+  isVerified: boolean;
+  createdAt: Date;
+}

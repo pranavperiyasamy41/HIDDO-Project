@@ -17,8 +17,13 @@ import {
   type InsertNotification,
   type StoryView,
   type InsertStoryView,
+  type VerificationToken,
+  type InsertVerificationToken,
+  type PendingUser,
+  type InsertPendingUser,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 
 export interface IStorage {
   // User operations - required for Replit Auth
@@ -65,6 +70,18 @@ export interface IStorage {
   getUserNotifications(userId: string): Promise<Notification[]>;
   markNotificationRead(id: string): Promise<boolean>;
   markAllNotificationsRead(userId: string): Promise<boolean>;
+
+  // Email verification
+  createVerificationToken(token: InsertVerificationToken): Promise<VerificationToken>;
+  getVerificationToken(token: string): Promise<VerificationToken | undefined>;
+  deleteVerificationToken(token: string): Promise<boolean>;
+  
+  // Pending users
+  createPendingUser(user: InsertPendingUser): Promise<PendingUser>;
+  getPendingUserByEmail(email: string): Promise<PendingUser | undefined>;
+  deletePendingUser(email: string): Promise<boolean>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  verifyPendingUserPassword(email: string, password: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -77,6 +94,8 @@ export class MemStorage implements IStorage {
   private saves: Map<string, Save> = new Map();
   private notifications: Map<string, Notification> = new Map();
   private storyViews: Map<string, StoryView> = new Map();
+  private verificationTokens: Map<string, VerificationToken> = new Map();
+  private pendingUsers: Map<string, PendingUser> = new Map();
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -410,6 +429,87 @@ export class MemStorage implements IStorage {
       }
     }
     return true;
+  }
+
+  // Email verification methods
+  async createVerificationToken(tokenData: InsertVerificationToken): Promise<VerificationToken> {
+    const token: VerificationToken = {
+      id: randomUUID(),
+      email: tokenData.email,
+      token: tokenData.token,
+      type: tokenData.type,
+      expiresAt: tokenData.expiresAt,
+      createdAt: new Date(),
+    };
+    this.verificationTokens.set(token.token, token);
+    return token;
+  }
+
+  async getVerificationToken(token: string): Promise<VerificationToken | undefined> {
+    const verificationToken = this.verificationTokens.get(token);
+    if (!verificationToken) return undefined;
+    
+    // Check if token is expired
+    if (verificationToken.expiresAt < new Date()) {
+      this.verificationTokens.delete(token);
+      return undefined;
+    }
+    
+    return verificationToken;
+  }
+
+  async deleteVerificationToken(token: string): Promise<boolean> {
+    return this.verificationTokens.delete(token);
+  }
+
+  // Pending users methods
+  async createPendingUser(userData: InsertPendingUser): Promise<PendingUser> {
+    // Check if user already exists
+    const existingUser = this.pendingUsers.get(userData.email);
+    if (existingUser) {
+      throw new Error("User with this email already exists");
+    }
+    
+    // Check if verified user already exists
+    const verifiedUser = await this.getUserByEmail(userData.email);
+    if (verifiedUser) {
+      throw new Error("User with this email already exists");
+    }
+    
+    // Hash password before storing
+    const saltRounds = 12;
+    const passwordHash = await bcrypt.hash(userData.password, saltRounds);
+    
+    const user: PendingUser = {
+      id: randomUUID(),
+      email: userData.email,
+      passwordHash,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      isVerified: userData.isVerified ?? false,
+      createdAt: new Date(),
+    };
+    this.pendingUsers.set(user.email, user);
+    return user;
+  }
+
+  async getPendingUserByEmail(email: string): Promise<PendingUser | undefined> {
+    return this.pendingUsers.get(email);
+  }
+
+  async deletePendingUser(email: string): Promise<boolean> {
+    return this.pendingUsers.delete(email);
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(u => u.email === email);
+  }
+
+  async verifyPendingUserPassword(email: string, password: string): Promise<boolean> {
+    const pendingUser = this.pendingUsers.get(email);
+    if (!pendingUser) return false;
+    
+    return await bcrypt.compare(password, pendingUser.passwordHash);
   }
 }
 
