@@ -75,6 +75,7 @@ export interface IStorage {
   createVerificationToken(token: InsertVerificationToken): Promise<VerificationToken>;
   getVerificationToken(token: string): Promise<VerificationToken | undefined>;
   deleteVerificationToken(token: string): Promise<boolean>;
+  deleteVerificationTokensByEmail(email: string): Promise<number>;
   
   // Pending users
   createPendingUser(user: InsertPendingUser): Promise<PendingUser>;
@@ -82,6 +83,7 @@ export interface IStorage {
   deletePendingUser(email: string): Promise<boolean>;
   getUserByEmail(email: string): Promise<User | undefined>;
   verifyPendingUserPassword(email: string, password: string): Promise<boolean>;
+  updatePendingUserVerification(email: string, isVerified: boolean): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -462,6 +464,17 @@ export class MemStorage implements IStorage {
     return this.verificationTokens.delete(token);
   }
 
+  async deleteVerificationTokensByEmail(email: string): Promise<number> {
+    let deletedCount = 0;
+    for (const [token, verificationToken] of Array.from(this.verificationTokens.entries())) {
+      if (verificationToken.email === email) {
+        this.verificationTokens.delete(token);
+        deletedCount++;
+      }
+    }
+    return deletedCount;
+  }
+
   // Pending users methods
   async createPendingUser(userData: InsertPendingUser): Promise<PendingUser> {
     // Check if user already exists
@@ -510,6 +523,15 @@ export class MemStorage implements IStorage {
     if (!pendingUser) return false;
     
     return await bcrypt.compare(password, pendingUser.passwordHash);
+  }
+
+  async updatePendingUserVerification(email: string, isVerified: boolean): Promise<boolean> {
+    const pendingUser = this.pendingUsers.get(email);
+    if (!pendingUser) return false;
+    
+    const updated = { ...pendingUser, isVerified };
+    this.pendingUsers.set(email, updated);
+    return true;
   }
 }
 

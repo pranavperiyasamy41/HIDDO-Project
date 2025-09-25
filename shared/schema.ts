@@ -104,6 +104,19 @@ export const insertPendingUserSchema = z.object({
   isVerified: z.boolean().default(false),
 });
 
+export const verifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
+
+export const completeAccountSchema = z.object({
+  email: z.string().email(),
+  username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores"),
+  displayName: z.string().min(1).max(50).optional(),
+  bio: z.string().max(500).optional(),
+  location: z.string().max(100).optional(),
+  gender: z.enum(["male", "female", "non-binary", "prefer-not-to-say"]).optional(),
+});
+
 // Export types
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
 export type User = PrismaUser;

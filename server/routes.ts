@@ -11,8 +11,14 @@ import {
   insertExplorerSchema,
   insertSaveSchema,
   insertNotificationSchema,
+  insertPendingUserSchema,
+  upsertUserSchema,
+  verifyEmailSchema,
+  completeAccountSchema,
 } from "@shared/schema";
 import { z } from "zod";
+import { sendVerificationEmail } from "./emailService";
+import { randomUUID } from "crypto";
 
 interface AuthenticatedUser {
   claims: {
@@ -37,6 +43,167 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Email verification routes
+  app.post('/api/auth/signup-email', async (req: Request, res: Response) => {
+    try {
+      const validatedData = insertPendingUserSchema.parse(req.body);
+      
+      // Normalize email
+      validatedData.email = validatedData.email.toLowerCase().trim();
+      
+      // Check if user already exists (but don't reveal this to prevent enumeration)
+      const existingUser = await storage.getUserByEmail(validatedData.email);
+      if (existingUser) {
+        // Return generic success message to prevent enumeration
+        return res.json({ message: "If your email is valid, you'll receive a verification link shortly. Please check your inbox." });
+      }
+      
+      // Invalidate any existing verification tokens for this email
+      await storage.deleteVerificationTokensByEmail(validatedData.email);
+      
+      // Create pending user
+      await storage.createPendingUser(validatedData);
+      
+      // Generate verification token
+      const token = randomUUID();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      await storage.createVerificationToken({
+        email: validatedData.email,
+        token,
+        type: "email_verification",
+        expiresAt,
+      });
+      
+      // Send verification email
+      await sendVerificationEmail(validatedData.email, token);
+      
+      // Always return success to prevent email enumeration
+      res.json({ message: "If your email is valid, you'll receive a verification link shortly. Please check your inbox." });
+    } catch (error) {
+      console.error("Email signup error:", error);
+      // Always return generic message to prevent email enumeration
+      res.json({ message: "If your email is valid, you'll receive a verification link shortly. Please check your inbox." });
+    }
+  });
+
+  app.post('/api/auth/verify-email', async (req: Request, res: Response) => {
+    try {
+      const validatedData = verifyEmailSchema.parse(req.body);
+      
+      // Get and validate token
+      const verificationToken = await storage.getVerificationToken(validatedData.token);
+      if (!verificationToken) {
+        return res.status(400).json({ message: "Invalid or expired verification token" });
+      }
+      
+      // Check token type
+      if (verificationToken.type !== "email_verification") {
+        return res.status(400).json({ message: "Invalid token type" });
+      }
+      
+      // Check expiry (additional safety check)
+      if (verificationToken.expiresAt < new Date()) {
+        await storage.deleteVerificationToken(validatedData.token);
+        return res.status(400).json({ message: "Verification token has expired" });
+      }
+      
+      // Get pending user
+      const pendingUser = await storage.getPendingUserByEmail(verificationToken.email);
+      if (!pendingUser) {
+        return res.status(400).json({ message: "Pending user not found" });
+      }
+      
+      // Mark pending user as verified
+      await storage.updatePendingUserVerification(verificationToken.email, true);
+      
+      // Delete the verification token
+      await storage.deleteVerificationToken(validatedData.token);
+      
+      res.json({ 
+        message: "Email verified successfully", 
+        email: verificationToken.email,
+        pendingUser: {
+          firstName: pendingUser.firstName,
+          lastName: pendingUser.lastName,
+        }
+      });
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.status(400).json({ message: "Invalid verification token" });
+    }
+  });
+
+  app.post('/api/auth/complete-account', async (req: Request, res: Response) => {
+    try {
+      const validatedData = completeAccountSchema.parse(req.body);
+      
+      // Normalize data
+      validatedData.email = validatedData.email.toLowerCase().trim();
+      validatedData.username = validatedData.username.toLowerCase().trim();
+      
+      // Check if user already exists with this email (critical security check)
+      const existingUserByEmail = await storage.getUserByEmail(validatedData.email);
+      if (existingUserByEmail) {
+        return res.status(400).json({ message: "An account with this email already exists" });
+      }
+      
+      // Check if pending user exists and is verified
+      const pendingUser = await storage.getPendingUserByEmail(validatedData.email);
+      if (!pendingUser) {
+        return res.status(400).json({ message: "No verified email found for this account" });
+      }
+      
+      if (!pendingUser.isVerified) {
+        return res.status(400).json({ message: "Email not verified. Please verify your email first." });
+      }
+      
+      // Check if username is already taken
+      const existingUserByUsername = await storage.getUserByUsername(validatedData.username);
+      if (existingUserByUsername) {
+        return res.status(400).json({ message: "Username is already taken" });
+      }
+      
+      // Create the full user account
+      const userData = {
+        id: randomUUID(),
+        email: pendingUser.email,
+        firstName: pendingUser.firstName,
+        lastName: pendingUser.lastName,
+        username: validatedData.username,
+        displayName: validatedData.displayName || `${pendingUser.firstName} ${pendingUser.lastName}`.trim(),
+        bio: validatedData.bio,
+        location: validatedData.location,
+        gender: validatedData.gender,
+        isVerified: true,
+      };
+      
+      const user = await storage.upsertUser(userData);
+      
+      // Clean up pending user
+      await storage.deletePendingUser(validatedData.email);
+      
+      res.json({ 
+        message: "Account created successfully",
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          displayName: user.displayName,
+        }
+      });
+    } catch (error) {
+      console.error("Account completion error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Invalid data provided", 
+          errors: error.errors 
+        });
+      }
+      res.status(500).json({ message: "Failed to complete account setup" });
     }
   });
 
@@ -221,7 +388,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: 'like',
           title: 'New Like',
           message: `${user?.displayName || user?.username || 'Someone'} liked your post`,
-          data: { postId, likeId: like.id }
+          data: { postId, likeId: like.id },
+          isRead: false
         });
       }
       
@@ -281,7 +449,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: 'comment',
           title: 'New Comment',
           message: `${user?.displayName || user?.username || 'Someone'} commented on your post`,
-          data: { postId, commentId: comment.id }
+          data: { postId, commentId: comment.id },
+          isRead: false
         });
       }
       
@@ -357,7 +526,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type: 'explorer_request',
         title: 'New Explorer Request',
         message: `${user?.displayName || user?.username || 'Someone'} wants to be your explorer`,
-        data: { explorerId: explorer.id, fromUserId: userId }
+        data: { explorerId: explorer.id, fromUserId: userId },
+        isRead: false
       });
       
       res.status(201).json(explorer);

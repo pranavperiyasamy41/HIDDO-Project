@@ -1,11 +1,13 @@
 import { MailService } from '@sendgrid/mail';
 
-if (!process.env.SENDGRID_API_KEY) {
-  throw new Error("SENDGRID_API_KEY environment variable must be set");
-}
+let mailService: MailService | null = null;
 
-const mailService = new MailService();
-mailService.setApiKey(process.env.SENDGRID_API_KEY);
+if (process.env.SENDGRID_API_KEY) {
+  mailService = new MailService();
+  mailService.setApiKey(process.env.SENDGRID_API_KEY);
+} else {
+  console.warn("SENDGRID_API_KEY not set - email sending will be simulated");
+}
 
 interface EmailParams {
   to: string;
@@ -17,12 +19,24 @@ interface EmailParams {
 
 export async function sendEmail(params: EmailParams): Promise<boolean> {
   try {
+    if (!mailService) {
+      // Simulate email sending in development
+      console.log('\n📧 [SIMULATED EMAIL]');
+      console.log('To:', params.to);
+      console.log('From:', params.from);
+      console.log('Subject:', params.subject);
+      console.log('Text:', params.text);
+      console.log('HTML length:', params.html?.length || 0);
+      console.log('-------------------\n');
+      return true;
+    }
+    
     await mailService.send({
       to: params.to,
       from: params.from,
       subject: params.subject,
-      text: params.text,
-      html: params.html,
+      text: params.text || '',
+      html: params.html || '',
     });
     return true;
   } catch (error) {
@@ -32,7 +46,8 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
 }
 
 export async function sendVerificationEmail(email: string, token: string): Promise<boolean> {
-  const verificationUrl = `${process.env.REPLIT_DOMAINS?.split(',')[0] || 'http://localhost:5000'}/verify-email?token=${token}`;
+  const domain = process.env.REPLIT_DOMAINS?.split(',')[0] || 'http://localhost:5000';
+  const verificationUrl = `${domain}/verify-email?token=${token}`;
   
   return sendEmail({
     to: email,
