@@ -98,10 +98,14 @@ export const insertVerificationTokenSchema = z.object({
 
 export const insertPendingUserSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
   isVerified: z.boolean().default(false),
+});
+
+export const completeProfileSchema = z.object({
+  email: z.string().email(),
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 export const verifyEmailSchema = z.object({
@@ -139,6 +143,7 @@ export type StoryView = PrismaStoryView;
 export type Session = PrismaSession;
 export type InsertVerificationToken = z.infer<typeof insertVerificationTokenSchema>;
 export type InsertPendingUser = z.infer<typeof insertPendingUserSchema>;
+export type CompleteProfile = z.infer<typeof completeProfileSchema>;
 
 // Simple types for verification tokens and pending users (since not in Prisma)
 export interface VerificationToken {
@@ -153,7 +158,7 @@ export interface VerificationToken {
 export interface PendingUser {
   id: string;
   email: string;
-  passwordHash: string;
+  passwordHash?: string;
   firstName?: string;
   lastName?: string;
   isVerified: boolean;
