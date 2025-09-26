@@ -14,40 +14,82 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-// Form schemas
-const signupSchema = z.object({
+// Form schemas for different steps
+const emailSignupSchema = z.object({
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  firstName: z.string().min(1, "First name is required").optional(),
-  lastName: z.string().min(1, "Last name is required").optional(),
 });
 
-type SignupForm = z.infer<typeof signupSchema>;
+const otpVerificationSchema = z.object({
+  token: z.string().min(1, "Verification code is required"),
+});
+
+const profileSchema = z.object({
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+});
+
+const accountSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters").max(30, "Username must be less than 30 characters").regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores"),
+  displayName: z.string().min(1, "Display name is required").max(50, "Display name must be less than 50 characters").optional(),
+  bio: z.string().max(500, "Bio must be less than 500 characters").optional(),
+  location: z.string().max(100, "Location must be less than 100 characters").optional(),
+  gender: z.enum(["male", "female", "non-binary", "prefer-not-to-say"]).optional(),
+});
+
+type EmailSignupForm = z.infer<typeof emailSignupSchema>;
+type OTPVerificationForm = z.infer<typeof otpVerificationSchema>;
+type ProfileForm = z.infer<typeof profileSchema>;
+type AccountForm = z.infer<typeof accountSchema>;
+
+type SignupStep = 'email' | 'verification' | 'profile' | 'account';
 
 export default function Landing() {
   const [authModal, setAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [emailSent, setEmailSent] = useState(false);
+  const [signupStep, setSignupStep] = useState<SignupStep>('email');
+  const [userEmail, setUserEmail] = useState('');
+  const [verificationSession, setVerificationSession] = useState('');
   const { theme, toggleTheme } = useTheme();
   const { toast } = useToast();
 
-  const form = useForm<SignupForm>({
-    resolver: zodResolver(signupSchema),
-    defaultValues: {
-      email: "",
-      password: "",
-      firstName: "",
-      lastName: "",
+  // Form instances for each step
+  const emailForm = useForm<EmailSignupForm>({
+    resolver: zodResolver(emailSignupSchema),
+    defaultValues: { email: "" },
+  });
+
+  const otpForm = useForm<OTPVerificationForm>({
+    resolver: zodResolver(otpVerificationSchema),
+    defaultValues: { token: "" },
+  });
+
+  const profileForm = useForm<ProfileForm>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: { 
+      firstName: "", 
+      lastName: ""
     },
   });
 
-  const signupMutation = useMutation({
-    mutationFn: async (data: SignupForm) => {
+  const accountForm = useForm<AccountForm>({
+    resolver: zodResolver(accountSchema),
+    defaultValues: { 
+      username: "",
+      displayName: "",
+      bio: "",
+      location: ""
+    },
+  });
+
+  // Step 1: Email signup mutation
+  const emailSignupMutation = useMutation({
+    mutationFn: async (data: EmailSignupForm) => {
       const response = await apiRequest("POST", "/api/auth/signup-email", data);
       return response.json();
     },
     onSuccess: (response: any) => {
-      setEmailSent(true);
+      setUserEmail(emailForm.getValues().email);
+      setSignupStep('verification');
       toast({
         title: "Verification email sent!",
         description: response.message,
@@ -62,26 +104,134 @@ export default function Landing() {
     },
   });
 
-  const handleAuth = (provider: 'google' | 'email') => {
-    if (provider === 'google') {
-      window.location.href = '/api/login';
-    } else if (authMode === 'login') {
-      // For login, still use Replit auth for now
+  // Step 2: Email verification mutation
+  const verifyEmailMutation = useMutation({
+    mutationFn: async (data: OTPVerificationForm) => {
+      const response = await apiRequest("POST", "/api/auth/verify-email", data);
+      return response.json();
+    },
+    onSuccess: (response: any) => {
+      setVerificationSession(response.verificationSession);
+      setSignupStep('profile');
+      toast({
+        title: "Email verified!",
+        description: response.message,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Verification failed",
+        description: error.message || "Invalid verification code. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Step 3: Profile completion mutation
+  const completeProfileMutation = useMutation({
+    mutationFn: async (data: ProfileForm) => {
+      const response = await apiRequest("POST", "/api/auth/complete-profile", data);
+      return response.json();
+    },
+    onSuccess: (response: any) => {
+      setSignupStep('account');
+      toast({
+        title: "Profile completed!",
+        description: response.message,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Profile completion failed",
+        description: error.message || "Failed to complete profile. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Step 4: Account completion mutation
+  const completeAccountMutation = useMutation({
+    mutationFn: async (data: AccountForm) => {
+      const response = await apiRequest("POST", "/api/auth/complete-account", data);
+      return response.json();
+    },
+    onSuccess: (response: any) => {
+      toast({
+        title: "Account created!",
+        description: "Welcome to Hiddo! Your account has been created successfully.",
+      });
+      resetModal();
+      // Redirect to app or refresh page
+      window.location.reload();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Account creation failed",
+        description: error.message || "Failed to create account. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleAuth = (provider: 'email') => {
+    if (authMode === 'login') {
+      // For login, use Replit auth
       window.location.href = '/api/login';
     }
   };
 
-  const onSubmit = (data: SignupForm) => {
-    if (authMode === 'signup') {
-      signupMutation.mutate(data);
-    }
+  // Submit handlers for each step
+  const onEmailSubmit = (data: EmailSignupForm) => {
+    emailSignupMutation.mutate(data);
+  };
+
+  const onOTPSubmit = (data: OTPVerificationForm) => {
+    verifyEmailMutation.mutate(data);
+  };
+
+  const onProfileSubmit = (data: ProfileForm) => {
+    completeProfileMutation.mutate({
+      firstName: data.firstName,
+      lastName: data.lastName,
+      verificationSession,
+    } as any);
+  };
+
+  const onAccountSubmit = (data: AccountForm) => {
+    completeAccountMutation.mutate({
+      username: data.username,
+      displayName: data.displayName,
+      bio: data.bio,
+      location: data.location,
+      gender: data.gender,
+      verificationSession,
+    } as any);
   };
 
   const resetModal = () => {
     setAuthModal(false);
-    setEmailSent(false);
-    form.reset();
+    setSignupStep('email');
+    setUserEmail('');
+    setVerificationSession('');
+    emailForm.reset();
+    otpForm.reset();
+    profileForm.reset();
+    accountForm.reset();
     setAuthMode('login');
+  };
+
+  const goBackStep = () => {
+    switch (signupStep) {
+      case 'verification':
+        setSignupStep('email');
+        break;
+      case 'profile':
+        setSignupStep('verification');
+        break;
+      case 'account':
+        setSignupStep('profile');
+        break;
+    }
   };
 
   return (
@@ -276,99 +426,312 @@ Hiddo
               <i className="fas fa-compass text-primary-foreground text-2xl"></i>
             </div>
             <DialogTitle className="text-2xl font-bold">
-              {authMode === 'login' ? 'Welcome Back' : 'Join Hiddo'}
+              {authMode === 'login' ? 'Welcome Back' : 
+               signupStep === 'email' ? 'Join Hiddo' :
+               signupStep === 'verification' ? 'Verify Email' :
+               signupStep === 'profile' ? 'Complete Profile' :
+               'Create Account'}
             </DialogTitle>
             <p className="text-muted-foreground">
               {authMode === 'login' 
                 ? 'Sign in to continue your exploration'
-                : 'Start discovering amazing places'
+                : signupStep === 'email' ? 'Enter your email to get started'
+                : signupStep === 'verification' ? `We sent a verification code to ${userEmail}`
+                : signupStep === 'profile' ? 'Tell us a bit about yourself'
+                : 'Almost there! Choose your username'
               }
             </p>
           </DialogHeader>
           
-          <div className="space-y-4">
-            <Button
-              className="w-full bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-              onClick={() => handleAuth('google')}
-              data-testid="button-google-signin"
-            >
-              <i className="fab fa-google mr-2"></i>
-              {authMode === 'login' ? 'Continue with Google' : 'Sign up with Google'}
-            </Button>
-            
-            <div className="relative">
-              <Separator className="my-4" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="px-4 bg-background text-muted-foreground text-sm">or</span>
-              </div>
-            </div>
-            
+          {authMode === 'login' ? (
+            // Login form
             <div className="space-y-4">
-              {authMode === 'signup' && (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input 
-                      type="text" 
-                      placeholder="First name" 
-                      data-testid="input-firstname"
-                    />
-                    <Input 
-                      type="text" 
-                      placeholder="Last name"
-                      data-testid="input-lastname" 
-                    />
-                  </div>
-                  <Input 
-                    type="text" 
-                    placeholder="Username"
-                    data-testid="input-username" 
-                  />
-                  <Select>
-                    <SelectTrigger data-testid="select-gender">
-                      <SelectValue placeholder="Select Gender" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="non-binary">Non-binary</SelectItem>
-                      <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-              
-              <Input 
-                type="email" 
-                placeholder="Email address"
-                data-testid="input-email" 
-              />
-              <Input 
-                type="password" 
-                placeholder="Password"
-                data-testid="input-password" 
-              />
-              
-              <Button 
+              <Button
                 className="w-full"
                 onClick={() => handleAuth('email')}
-                data-testid="button-email-auth"
+                data-testid="button-login-replit"
               >
-                {authMode === 'login' ? 'Sign In' : 'Create Account'}
+                <i className="fas fa-sign-in-alt mr-2"></i>
+                Continue with Replit
               </Button>
               
               <p className="text-center text-sm text-muted-foreground">
-                {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                Don't have an account? 
                 <Button 
                   variant="link" 
                   className="p-0 h-auto font-medium"
-                  onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-                  data-testid="button-toggle-auth"
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setSignupStep('email');
+                  }}
+                  data-testid="button-toggle-signup"
                 >
-                  {authMode === 'login' ? 'Sign up' : 'Sign in'}
+                  Sign up
                 </Button>
               </p>
             </div>
-          </div>
+          ) : (
+            // Multi-step signup
+            <div className="space-y-4">
+              {signupStep === 'email' && (
+                <Form {...emailForm}>
+                  <form onSubmit={emailForm.handleSubmit(onEmailSubmit)} className="space-y-4">
+                    <FormField
+                      control={emailForm.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email Address</FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="email" 
+                              placeholder="Enter your email"
+                              data-testid="input-email"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <Button 
+                      type="submit" 
+                      className="w-full"
+                      disabled={emailSignupMutation.isPending}
+                      data-testid="button-send-verification"
+                    >
+                      {emailSignupMutation.isPending ? "Sending..." : "Send Verification Code"}
+                    </Button>
+                  </form>
+                </Form>
+              )}
+
+              {signupStep === 'verification' && (
+                <div className="space-y-4">
+                  <Form {...otpForm}>
+                    <form onSubmit={otpForm.handleSubmit(onOTPSubmit)} className="space-y-4">
+                      <FormField
+                        control={otpForm.control}
+                        name="token"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Verification Code</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="Enter the code from your email"
+                                data-testid="input-verification-code"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <Button 
+                        type="submit" 
+                        className="w-full"
+                        disabled={verifyEmailMutation.isPending}
+                        data-testid="button-verify-email"
+                      >
+                        {verifyEmailMutation.isPending ? "Verifying..." : "Verify Email"}
+                      </Button>
+                    </form>
+                  </Form>
+                  
+                  <Button 
+                    variant="ghost" 
+                    className="w-full"
+                    onClick={goBackStep}
+                    data-testid="button-back"
+                  >
+                    Back
+                  </Button>
+                </div>
+              )}
+
+              {signupStep === 'profile' && (
+                <div className="space-y-4">
+                  <Form {...profileForm}>
+                    <form onSubmit={profileForm.handleSubmit(onProfileSubmit)} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                          control={profileForm.control}
+                          name="firstName"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>First Name</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  placeholder="First name"
+                                  data-testid="input-firstname"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        
+                        <FormField
+                          control={profileForm.control}
+                          name="lastName"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Last Name</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  placeholder="Last name"
+                                  data-testid="input-lastname"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      
+                      <Button 
+                        type="submit" 
+                        className="w-full"
+                        disabled={completeProfileMutation.isPending}
+                        data-testid="button-complete-profile"
+                      >
+                        {completeProfileMutation.isPending ? "Saving..." : "Continue"}
+                      </Button>
+                    </form>
+                  </Form>
+                  
+                  <Button 
+                    variant="ghost" 
+                    className="w-full"
+                    onClick={goBackStep}
+                    data-testid="button-back"
+                  >
+                    Back
+                  </Button>
+                </div>
+              )}
+
+              {signupStep === 'account' && (
+                <div className="space-y-4">
+                  <Form {...accountForm}>
+                    <form onSubmit={accountForm.handleSubmit(onAccountSubmit)} className="space-y-4">
+                      <FormField
+                        control={accountForm.control}
+                        name="username"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Username</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="Choose a username"
+                                data-testid="input-username"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={accountForm.control}
+                        name="displayName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Display Name (Optional)</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="How should others see your name?"
+                                data-testid="input-display-name"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={accountForm.control}
+                        name="bio"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Bio (Optional)</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="Tell us about yourself"
+                                data-testid="input-bio"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={accountForm.control}
+                        name="gender"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Gender (Optional)</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-gender">
+                                  <SelectValue placeholder="Select gender" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="male">Male</SelectItem>
+                                <SelectItem value="female">Female</SelectItem>
+                                <SelectItem value="non-binary">Non-binary</SelectItem>
+                                <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <Button 
+                        type="submit" 
+                        className="w-full"
+                        disabled={completeAccountMutation.isPending}
+                        data-testid="button-create-account"
+                      >
+                        {completeAccountMutation.isPending ? "Creating Account..." : "Create Account"}
+                      </Button>
+                    </form>
+                  </Form>
+                  
+                  <Button 
+                    variant="ghost" 
+                    className="w-full"
+                    onClick={goBackStep}
+                    data-testid="button-back"
+                  >
+                    Back
+                  </Button>
+                </div>
+              )}
+              
+              <p className="text-center text-sm text-muted-foreground">
+                Already have an account? 
+                <Button 
+                  variant="link" 
+                  className="p-0 h-auto font-medium"
+                  onClick={() => setAuthMode('login')}
+                  data-testid="button-toggle-login"
+                >
+                  Sign in
+                </Button>
+              </p>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
