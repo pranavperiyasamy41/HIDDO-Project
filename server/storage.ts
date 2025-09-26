@@ -21,6 +21,8 @@ import {
   type InsertVerificationToken,
   type PendingUser,
   type InsertPendingUser,
+  type VerificationSession,
+  type InsertVerificationSession,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
@@ -82,8 +84,14 @@ export interface IStorage {
   getPendingUserByEmail(email: string): Promise<PendingUser | undefined>;
   deletePendingUser(email: string): Promise<boolean>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  verifyPendingUserPassword(email: string, password: string): Promise<boolean>;
+  updatePendingUserProfile(email: string, profileData: { firstName: string; lastName: string }): Promise<boolean>;
   updatePendingUserVerification(email: string, isVerified: boolean): Promise<boolean>;
+  
+  // Verification sessions
+  createVerificationSession(session: InsertVerificationSession): Promise<VerificationSession>;
+  getVerificationSession(sessionToken: string): Promise<VerificationSession | undefined>;
+  markVerificationSessionUsed(sessionToken: string): Promise<boolean>;
+  deleteVerificationSession(sessionToken: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -98,6 +106,7 @@ export class MemStorage implements IStorage {
   private storyViews: Map<string, StoryView> = new Map();
   private verificationTokens: Map<string, VerificationToken> = new Map();
   private pendingUsers: Map<string, PendingUser> = new Map();
+  private verificationSessions: Map<string, VerificationSession> = new Map();
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -489,16 +498,9 @@ export class MemStorage implements IStorage {
       throw new Error("User with this email already exists");
     }
     
-    // Hash password before storing
-    const saltRounds = 12;
-    const passwordHash = await bcrypt.hash(userData.password, saltRounds);
-    
     const user: PendingUser = {
       id: randomUUID(),
       email: userData.email,
-      passwordHash,
-      firstName: userData.firstName,
-      lastName: userData.lastName,
       isVerified: userData.isVerified ?? false,
       createdAt: new Date(),
     };
@@ -518,11 +520,17 @@ export class MemStorage implements IStorage {
     return Array.from(this.users.values()).find(u => u.email === email);
   }
 
-  async verifyPendingUserPassword(email: string, password: string): Promise<boolean> {
+  async updatePendingUserProfile(email: string, profileData: { firstName: string; lastName: string }): Promise<boolean> {
     const pendingUser = this.pendingUsers.get(email);
     if (!pendingUser) return false;
     
-    return await bcrypt.compare(password, pendingUser.passwordHash);
+    const updated = { 
+      ...pendingUser, 
+      firstName: profileData.firstName,
+      lastName: profileData.lastName,
+    };
+    this.pendingUsers.set(email, updated);
+    return true;
   }
 
   async updatePendingUserVerification(email: string, isVerified: boolean): Promise<boolean> {
@@ -532,6 +540,51 @@ export class MemStorage implements IStorage {
     const updated = { ...pendingUser, isVerified };
     this.pendingUsers.set(email, updated);
     return true;
+  }
+
+  // Verification sessions methods
+  async createVerificationSession(sessionData: InsertVerificationSession): Promise<VerificationSession> {
+    const session: VerificationSession = {
+      id: randomUUID(),
+      email: sessionData.email,
+      sessionToken: sessionData.sessionToken,
+      expiresAt: sessionData.expiresAt,
+      used: sessionData.used ?? false,
+      createdAt: new Date(),
+    };
+    this.verificationSessions.set(session.sessionToken, session);
+    return session;
+  }
+
+  async getVerificationSession(sessionToken: string): Promise<VerificationSession | undefined> {
+    const session = this.verificationSessions.get(sessionToken);
+    if (!session) return undefined;
+    
+    // Check if session is expired
+    if (session.expiresAt < new Date()) {
+      this.verificationSessions.delete(sessionToken);
+      return undefined;
+    }
+    
+    // Check if session is already used
+    if (session.used) {
+      return undefined;
+    }
+    
+    return session;
+  }
+
+  async markVerificationSessionUsed(sessionToken: string): Promise<boolean> {
+    const session = this.verificationSessions.get(sessionToken);
+    if (!session) return false;
+    
+    const updated = { ...session, used: true };
+    this.verificationSessions.set(sessionToken, updated);
+    return true;
+  }
+
+  async deleteVerificationSession(sessionToken: string): Promise<boolean> {
+    return this.verificationSessions.delete(sessionToken);
   }
 }
 

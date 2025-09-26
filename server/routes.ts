@@ -15,6 +15,8 @@ import {
   upsertUserSchema,
   verifyEmailSchema,
   completeAccountSchema,
+  completeProfileSchema,
+  insertVerificationSessionSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { sendVerificationEmail } from "./emailService";
@@ -120,12 +122,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Mark pending user as verified
       await storage.updatePendingUserVerification(verificationToken.email, true);
       
+      // Create verification session for next step
+      const sessionToken = randomUUID();
+      const sessionExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+      
+      await storage.createVerificationSession({
+        email: verificationToken.email,
+        sessionToken,
+        expiresAt: sessionExpiresAt,
+        used: false,
+      });
+      
       // Delete the verification token
       await storage.deleteVerificationToken(validatedData.token);
       
       res.json({ 
         message: "Email verified successfully", 
-        email: verificationToken.email,
+        verificationSession: sessionToken,
         pendingUser: {
           firstName: pendingUser.firstName,
           lastName: pendingUser.lastName,
@@ -137,28 +150,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/auth/complete-profile', async (req: Request, res: Response) => {
+    try {
+      const validatedData = completeProfileSchema.parse(req.body);
+      
+      // Get and validate verification session
+      const verificationSession = await storage.getVerificationSession(validatedData.verificationSession);
+      if (!verificationSession) {
+        return res.status(400).json({ message: "Invalid or expired verification session" });
+      }
+      
+      // Get pending user using email from verified session (not from request body)
+      const pendingUser = await storage.getPendingUserByEmail(verificationSession.email);
+      if (!pendingUser) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+      
+      if (!pendingUser.isVerified) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+      
+      // Check if user already has profile completed (firstName exists)
+      if (pendingUser.firstName && pendingUser.lastName) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+      
+      // Update pending user with profile data
+      const success = await storage.updatePendingUserProfile(verificationSession.email, {
+        firstName: validatedData.firstName,
+        lastName: validatedData.lastName,
+      });
+      
+      if (!success) {
+        return res.status(500).json({ message: "Failed to complete profile" });
+      }
+      
+      res.json({ 
+        message: "Profile completed successfully",
+        firstName: validatedData.firstName,
+        lastName: validatedData.lastName,
+      });
+    } catch (error) {
+      console.error("Profile completion error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Invalid data provided", 
+          errors: error.errors 
+        });
+      }
+      res.status(500).json({ message: "Failed to complete profile" });
+    }
+  });
+
   app.post('/api/auth/complete-account', async (req: Request, res: Response) => {
     try {
       const validatedData = completeAccountSchema.parse(req.body);
       
-      // Normalize data
-      validatedData.email = validatedData.email.toLowerCase().trim();
+      // Normalize username
       validatedData.username = validatedData.username.toLowerCase().trim();
       
+      // Get and validate verification session
+      const verificationSession = await storage.getVerificationSession(validatedData.verificationSession);
+      if (!verificationSession) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+      
+      // Get pending user using email from verified session (not from request body)
+      const pendingUser = await storage.getPendingUserByEmail(verificationSession.email);
+      if (!pendingUser || !pendingUser.isVerified) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+      
+      // Ensure profile is completed (firstName and lastName must exist)
+      if (!pendingUser.firstName || !pendingUser.lastName) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+      
       // Check if user already exists with this email (critical security check)
-      const existingUserByEmail = await storage.getUserByEmail(validatedData.email);
+      const existingUserByEmail = await storage.getUserByEmail(verificationSession.email);
       if (existingUserByEmail) {
-        return res.status(400).json({ message: "An account with this email already exists" });
-      }
-      
-      // Check if pending user exists and is verified
-      const pendingUser = await storage.getPendingUserByEmail(validatedData.email);
-      if (!pendingUser) {
-        return res.status(400).json({ message: "No verified email found for this account" });
-      }
-      
-      if (!pendingUser.isVerified) {
-        return res.status(400).json({ message: "Email not verified. Please verify your email first." });
+        return res.status(400).json({ message: "Invalid session" });
       }
       
       // Check if username is already taken
@@ -183,8 +254,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const user = await storage.upsertUser(userData);
       
-      // Clean up pending user
-      await storage.deletePendingUser(validatedData.email);
+      // Mark verification session as used and clean up
+      await storage.markVerificationSessionUsed(validatedData.verificationSession);
+      await storage.deletePendingUser(verificationSession.email);
       
       res.json({ 
         message: "Account created successfully",
