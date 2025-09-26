@@ -20,7 +20,8 @@ const emailSignupSchema = z.object({
 });
 
 const otpVerificationSchema = z.object({
-  token: z.string().min(1, "Verification code is required"),
+  email: z.string().email(),
+  token: z.string().regex(/^[0-9]{6}$/, "Verification code must be exactly 6 digits"),
 });
 
 const profileSchema = z.object({
@@ -60,7 +61,7 @@ export default function Landing() {
 
   const otpForm = useForm<OTPVerificationForm>({
     resolver: zodResolver(otpVerificationSchema),
-    defaultValues: { token: "" },
+    defaultValues: { email: "", token: "" },
   });
 
   const profileForm = useForm<ProfileForm>({
@@ -88,10 +89,12 @@ export default function Landing() {
       return response.json();
     },
     onSuccess: (response: any) => {
-      setUserEmail(emailForm.getValues().email);
+      const email = emailForm.getValues().email;
+      setUserEmail(email);
+      otpForm.setValue('email', email);
       setSignupStep('verification');
       toast({
-        title: "Verification email sent!",
+        title: "Verification code sent!",
         description: response.message,
       });
     },

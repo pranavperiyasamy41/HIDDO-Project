@@ -76,6 +76,7 @@ export interface IStorage {
   // Email verification
   createVerificationToken(token: InsertVerificationToken): Promise<VerificationToken>;
   getVerificationToken(token: string): Promise<VerificationToken | undefined>;
+  getVerificationTokenByEmail(email: string): Promise<VerificationToken | undefined>;
   deleteVerificationToken(token: string): Promise<boolean>;
   deleteVerificationTokensByEmail(email: string): Promise<number>;
   
@@ -92,6 +93,12 @@ export interface IStorage {
   getVerificationSession(sessionToken: string): Promise<VerificationSession | undefined>;
   markVerificationSessionUsed(sessionToken: string): Promise<boolean>;
   deleteVerificationSession(sessionToken: string): Promise<boolean>;
+  
+  // Rate limiting
+  checkEmailSignupRateLimit(email: string): Promise<{ allowed: boolean; retryAfter?: number }>;
+  recordEmailSignupAttempt(email: string): Promise<void>;
+  checkVerificationRateLimit(email: string): Promise<{ allowed: boolean; locked: boolean; retryAfter?: number }>;
+  recordVerificationAttempt(email: string, success: boolean): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -107,6 +114,10 @@ export class MemStorage implements IStorage {
   private verificationTokens: Map<string, VerificationToken> = new Map();
   private pendingUsers: Map<string, PendingUser> = new Map();
   private verificationSessions: Map<string, VerificationSession> = new Map();
+  
+  // Rate limiting storage
+  private emailSignupAttempts: Map<string, { count: number; lastAttempt: Date }> = new Map();
+  private verifyAttempts: Map<string, { count: number; lastAttempt: Date; locked: boolean; lockUntil?: Date }> = new Map();
 
   // User operations
   async getUser(id: string): Promise<User | undefined> {
@@ -469,6 +480,21 @@ export class MemStorage implements IStorage {
     return verificationToken;
   }
 
+  async getVerificationTokenByEmail(email: string): Promise<VerificationToken | undefined> {
+    const verificationToken = Array.from(this.verificationTokens.values())
+      .find(token => token.email === email);
+    
+    if (!verificationToken) return undefined;
+    
+    // Check if token is expired
+    if (verificationToken.expiresAt < new Date()) {
+      this.verificationTokens.delete(verificationToken.token);
+      return undefined;
+    }
+    
+    return verificationToken;
+  }
+
   async deleteVerificationToken(token: string): Promise<boolean> {
     return this.verificationTokens.delete(token);
   }
@@ -585,6 +611,110 @@ export class MemStorage implements IStorage {
 
   async deleteVerificationSession(sessionToken: string): Promise<boolean> {
     return this.verificationSessions.delete(sessionToken);
+  }
+
+  // Rate limiting methods
+  async checkEmailSignupRateLimit(email: string): Promise<{ allowed: boolean; retryAfter?: number }> {
+    const now = new Date();
+    const attempts = this.emailSignupAttempts.get(email);
+    
+    if (!attempts) {
+      return { allowed: true };
+    }
+    
+    // Reset count if more than 1 hour has passed
+    const hoursSinceLastAttempt = (now.getTime() - attempts.lastAttempt.getTime()) / (1000 * 60 * 60);
+    if (hoursSinceLastAttempt >= 1) {
+      this.emailSignupAttempts.delete(email);
+      return { allowed: true };
+    }
+    
+    // Limit to 5 attempts per hour
+    if (attempts.count >= 5) {
+      const retryAfter = Math.ceil((attempts.lastAttempt.getTime() + (60 * 60 * 1000) - now.getTime()) / 1000);
+      return { allowed: false, retryAfter };
+    }
+    
+    // Enforce 60-second cooldown between attempts
+    const secondsSinceLastAttempt = (now.getTime() - attempts.lastAttempt.getTime()) / 1000;
+    if (secondsSinceLastAttempt < 60) {
+      const retryAfter = Math.ceil(60 - secondsSinceLastAttempt);
+      return { allowed: false, retryAfter };
+    }
+    
+    return { allowed: true };
+  }
+
+  async recordEmailSignupAttempt(email: string): Promise<void> {
+    const now = new Date();
+    const attempts = this.emailSignupAttempts.get(email);
+    
+    if (!attempts) {
+      this.emailSignupAttempts.set(email, { count: 1, lastAttempt: now });
+    } else {
+      // Reset count if more than 1 hour has passed
+      const hoursSinceLastAttempt = (now.getTime() - attempts.lastAttempt.getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLastAttempt >= 1) {
+        this.emailSignupAttempts.set(email, { count: 1, lastAttempt: now });
+      } else {
+        this.emailSignupAttempts.set(email, { count: attempts.count + 1, lastAttempt: now });
+      }
+    }
+  }
+
+  async checkVerificationRateLimit(email: string): Promise<{ allowed: boolean; locked: boolean; retryAfter?: number }> {
+    const now = new Date();
+    const attempts = this.verifyAttempts.get(email);
+    
+    if (!attempts) {
+      return { allowed: true, locked: false };
+    }
+    
+    // Check if account is locked
+    if (attempts.locked && attempts.lockUntil && now < attempts.lockUntil) {
+      const retryAfter = Math.ceil((attempts.lockUntil.getTime() - now.getTime()) / 1000);
+      return { allowed: false, locked: true, retryAfter };
+    }
+    
+    // Reset lock if lockout period has passed
+    if (attempts.locked && attempts.lockUntil && now >= attempts.lockUntil) {
+      this.verifyAttempts.set(email, { count: 0, lastAttempt: now, locked: false });
+      return { allowed: true, locked: false };
+    }
+    
+    // Reset count if more than 15 minutes has passed
+    const minutesSinceLastAttempt = (now.getTime() - attempts.lastAttempt.getTime()) / (1000 * 60);
+    if (minutesSinceLastAttempt >= 15) {
+      this.verifyAttempts.set(email, { count: 0, lastAttempt: now, locked: false });
+      return { allowed: true, locked: false };
+    }
+    
+    return { allowed: true, locked: false };
+  }
+
+  async recordVerificationAttempt(email: string, success: boolean): Promise<void> {
+    const now = new Date();
+    const attempts = this.verifyAttempts.get(email);
+    
+    if (success) {
+      // Clear attempts on successful verification
+      this.verifyAttempts.delete(email);
+      return;
+    }
+    
+    if (!attempts) {
+      this.verifyAttempts.set(email, { count: 1, lastAttempt: now, locked: false });
+    } else {
+      const newCount = attempts.count + 1;
+      
+      // Lock account after 5 failed attempts for 15 minutes
+      if (newCount >= 5) {
+        const lockUntil = new Date(now.getTime() + 15 * 60 * 1000);
+        this.verifyAttempts.set(email, { count: newCount, lastAttempt: now, locked: true, lockUntil });
+      } else {
+        this.verifyAttempts.set(email, { count: newCount, lastAttempt: now, locked: false });
+      }
+    }
   }
 }
 

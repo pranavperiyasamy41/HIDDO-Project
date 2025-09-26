@@ -91,7 +91,7 @@ export const insertStoryViewSchema = z.object({
 
 export const insertVerificationTokenSchema = z.object({
   email: z.string().email(),
-  token: z.string(),
+  token: z.string().regex(/^[0-9]{6}$/, "Token must be exactly 6 digits"),
   type: z.enum(["email_verification", "password_reset"]).default("email_verification"),
   expiresAt: z.coerce.date(),
 });
@@ -115,7 +115,8 @@ export const insertVerificationSessionSchema = z.object({
 });
 
 export const verifyEmailSchema = z.object({
-  token: z.string().min(1),
+  email: z.string().email(),
+  token: z.string().regex(/^[0-9]{6}$/, "Token must be exactly 6 digits"),
 });
 
 export const completeAccountSchema = z.object({

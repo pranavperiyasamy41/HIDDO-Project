@@ -46,31 +46,27 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
 }
 
 export async function sendVerificationEmail(email: string, token: string): Promise<boolean> {
-  const domain = process.env.REPLIT_DOMAINS?.split(',')[0] || 'http://localhost:5000';
-  const verificationUrl = `${domain}/verify-email?token=${token}`;
-  
   return sendEmail({
     to: email,
     from: 'noreply@hiddo.app', // You should use a verified sender email
-    subject: 'Verify your Hiddo account',
+    subject: 'Your Hiddo verification code',
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #2563eb;">Welcome to Hiddo!</h2>
-        <p>Thank you for signing up. Please verify your email address by clicking the button below:</p>
+        <p>Thank you for signing up. Please enter the verification code below in the app:</p>
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${verificationUrl}" 
-             style="background-color: #2563eb; color: white; padding: 12px 24px; 
-                    text-decoration: none; border-radius: 6px; display: inline-block;">
-            Verify Email Address
-          </a>
+          <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; display: inline-block;">
+            <span style="font-size: 32px; font-weight: bold; color: #2563eb; letter-spacing: 8px; font-family: monospace;">
+              ${token}
+            </span>
+          </div>
         </div>
-        <p>Or copy and paste this link into your browser:</p>
-        <p style="word-break: break-all; color: #6b7280;">${verificationUrl}</p>
+        <p style="text-align: center; color: #6b7280;">Enter this 6-digit code to verify your email address</p>
         <p style="color: #6b7280; font-size: 14px;">
-          This link will expire in 24 hours. If you didn't create an account, you can safely ignore this email.
+          This code will expire in 10 minutes. If you didn't create an account, you can safely ignore this email.
         </p>
       </div>
     `,
-    text: `Welcome to Hiddo! Please verify your email address by visiting: ${verificationUrl}`
+    text: `Welcome to Hiddo! Your verification code is: ${token}. Enter this code in the app to verify your email address.`
   });
 }

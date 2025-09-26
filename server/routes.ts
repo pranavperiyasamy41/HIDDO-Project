@@ -56,11 +56,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Normalize email
       validatedData.email = validatedData.email.toLowerCase().trim();
       
+      // Check rate limiting
+      const rateLimitResult = await storage.checkEmailSignupRateLimit(validatedData.email);
+      if (!rateLimitResult.allowed) {
+        return res.status(429).json({ 
+          message: "Too many attempts. Please try again later.",
+          retryAfter: rateLimitResult.retryAfter 
+        });
+      }
+      
       // Check if user already exists (but don't reveal this to prevent enumeration)
       const existingUser = await storage.getUserByEmail(validatedData.email);
       if (existingUser) {
+        // Still record the attempt to prevent enumeration
+        await storage.recordEmailSignupAttempt(validatedData.email);
         // Return generic success message to prevent enumeration
-        return res.json({ message: "If your email is valid, you'll receive a verification link shortly. Please check your inbox." });
+        return res.json({ message: "If your email is valid, you'll receive a verification code shortly. Please check your inbox." });
       }
       
       // Invalidate any existing verification tokens for this email
@@ -69,9 +80,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create pending user
       await storage.createPendingUser(validatedData);
       
-      // Generate verification token
-      const token = randomUUID();
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      // Generate secure 6-digit OTP code
+      const { randomInt } = await import('crypto');
+      const token = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
       
       await storage.createVerificationToken({
         email: validatedData.email,
@@ -83,12 +95,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Send verification email
       await sendVerificationEmail(validatedData.email, token);
       
+      // Record the attempt
+      await storage.recordEmailSignupAttempt(validatedData.email);
+      
       // Always return success to prevent email enumeration
-      res.json({ message: "If your email is valid, you'll receive a verification link shortly. Please check your inbox." });
+      res.json({ message: "If your email is valid, you'll receive a verification code shortly. Please check your inbox." });
     } catch (error) {
       console.error("Email signup error:", error);
       // Always return generic message to prevent email enumeration
-      res.json({ message: "If your email is valid, you'll receive a verification link shortly. Please check your inbox." });
+      res.json({ message: "If your email is valid, you'll receive a verification code shortly. Please check your inbox." });
     }
   });
 
@@ -96,10 +111,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = verifyEmailSchema.parse(req.body);
       
-      // Get and validate token
-      const verificationToken = await storage.getVerificationToken(validatedData.token);
+      // Check rate limiting
+      const rateLimitResult = await storage.checkVerificationRateLimit(validatedData.email);
+      if (!rateLimitResult.allowed) {
+        const message = rateLimitResult.locked 
+          ? "Account temporarily locked due to too many failed attempts. Please try again later."
+          : "Too many attempts. Please try again later.";
+        return res.status(429).json({ 
+          message,
+          retryAfter: rateLimitResult.retryAfter 
+        });
+      }
+      
+      // Get and validate token by email
+      const verificationToken = await storage.getVerificationTokenByEmail(validatedData.email);
       if (!verificationToken) {
-        return res.status(400).json({ message: "Invalid or expired verification token" });
+        await storage.recordVerificationAttempt(validatedData.email, false);
+        return res.status(400).json({ message: "Invalid or expired verification code" });
+      }
+      
+      // Check token match
+      if (verificationToken.token !== validatedData.token) {
+        await storage.recordVerificationAttempt(validatedData.email, false);
+        return res.status(400).json({ message: "Invalid verification code" });
       }
       
       // Check token type
@@ -107,10 +141,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid token type" });
       }
       
-      // Check expiry (additional safety check)
+      // Check expiry
       if (verificationToken.expiresAt < new Date()) {
-        await storage.deleteVerificationToken(validatedData.token);
-        return res.status(400).json({ message: "Verification token has expired" });
+        await storage.deleteVerificationTokensByEmail(validatedData.email);
+        await storage.recordVerificationAttempt(validatedData.email, false);
+        return res.status(400).json({ message: "Verification code has expired" });
       }
       
       // Get pending user
@@ -133,8 +168,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         used: false,
       });
       
-      // Delete the verification token
-      await storage.deleteVerificationToken(validatedData.token);
+      // Delete all verification tokens for this email (safety measure)
+      await storage.deleteVerificationTokensByEmail(validatedData.email);
+      
+      // Record successful attempt
+      await storage.recordVerificationAttempt(validatedData.email, true);
       
       res.json({ 
         message: "Email verified successfully", 
@@ -146,7 +184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Email verification error:", error);
-      res.status(400).json({ message: "Invalid verification token" });
+      res.status(400).json({ message: "Invalid verification code" });
     }
   });
 
