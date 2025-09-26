@@ -41,12 +41,12 @@ type OTPVerificationForm = z.infer<typeof otpVerificationSchema>;
 type ProfileForm = z.infer<typeof profileSchema>;
 type AccountForm = z.infer<typeof accountSchema>;
 
-type SignupStep = 'email' | 'verification' | 'profile' | 'account';
+type SignupStep = 'options' | 'email' | 'verification' | 'profile' | 'account';
 
 export default function Landing() {
   const [authModal, setAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [signupStep, setSignupStep] = useState<SignupStep>('email');
+  const [signupStep, setSignupStep] = useState<SignupStep>('options');
   const [userEmail, setUserEmail] = useState('');
   const [verificationSession, setVerificationSession] = useState('');
   const { theme, toggleTheme } = useTheme();
@@ -173,11 +173,15 @@ export default function Landing() {
     },
   });
 
-  const handleAuth = (provider: 'email') => {
+  const handleAuth = (provider: 'google' | 'email') => {
     if (authMode === 'login') {
       // For login, use Replit auth
       window.location.href = '/api/login';
+    } else if (provider === 'google') {
+      // For Google signup, use Replit auth
+      window.location.href = '/api/login';
     }
+    // For email signup, the modal will handle the form flow
   };
 
   // Submit handlers for each step
@@ -210,7 +214,7 @@ export default function Landing() {
 
   const resetModal = () => {
     setAuthModal(false);
-    setSignupStep('email');
+    setSignupStep('options');
     setUserEmail('');
     setVerificationSession('');
     emailForm.reset();
@@ -222,6 +226,9 @@ export default function Landing() {
 
   const goBackStep = () => {
     switch (signupStep) {
+      case 'email':
+        setSignupStep('options');
+        break;
       case 'verification':
         setSignupStep('email');
         break;
@@ -427,7 +434,8 @@ Hiddo
             </div>
             <DialogTitle className="text-2xl font-bold">
               {authMode === 'login' ? 'Welcome Back' : 
-               signupStep === 'email' ? 'Join Hiddo' :
+               signupStep === 'options' ? 'Join Hiddo' :
+               signupStep === 'email' ? 'Sign up with Email' :
                signupStep === 'verification' ? 'Verify Email' :
                signupStep === 'profile' ? 'Complete Profile' :
                'Create Account'}
@@ -435,6 +443,7 @@ Hiddo
             <p className="text-muted-foreground">
               {authMode === 'login' 
                 ? 'Sign in to continue your exploration'
+                : signupStep === 'options' ? 'Choose how you\'d like to get started'
                 : signupStep === 'email' ? 'Enter your email to get started'
                 : signupStep === 'verification' ? `We sent a verification code to ${userEmail}`
                 : signupStep === 'profile' ? 'Tell us a bit about yourself'
@@ -462,7 +471,7 @@ Hiddo
                   className="p-0 h-auto font-medium"
                   onClick={() => {
                     setAuthMode('signup');
-                    setSignupStep('email');
+                    setSignupStep('options');
                   }}
                   data-testid="button-toggle-signup"
                 >
@@ -473,6 +482,50 @@ Hiddo
           ) : (
             // Multi-step signup
             <div className="space-y-4">
+              {signupStep === 'options' && (
+                <div className="space-y-4">
+                  <Button
+                    className="w-full"
+                    onClick={() => handleAuth('google')}
+                    data-testid="button-signup-google"
+                  >
+                    <i className="fab fa-google mr-2"></i>
+                    Sign up with Google
+                  </Button>
+                  
+                  <div className="flex items-center">
+                    <Separator className="flex-1" />
+                    <span className="px-4 text-sm text-muted-foreground">or</span>
+                    <Separator className="flex-1" />
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setSignupStep('email')}
+                    data-testid="button-signup-email"
+                  >
+                    <i className="fas fa-envelope mr-2"></i>
+                    Sign up with Email
+                  </Button>
+                  
+                  <p className="text-center text-sm text-muted-foreground">
+                    Already have an account? 
+                    <Button 
+                      variant="link" 
+                      className="p-0 h-auto font-medium"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setSignupStep('options');
+                      }}
+                      data-testid="button-toggle-login"
+                    >
+                      Log in
+                    </Button>
+                  </p>
+                </div>
+              )}
+
               {signupStep === 'email' && (
                 <Form {...emailForm}>
                   <form onSubmit={emailForm.handleSubmit(onEmailSubmit)} className="space-y-4">
@@ -502,6 +555,15 @@ Hiddo
                       data-testid="button-send-verification"
                     >
                       {emailSignupMutation.isPending ? "Sending..." : "Send Verification Code"}
+                    </Button>
+                    
+                    <Button 
+                      variant="ghost" 
+                      className="w-full"
+                      onClick={goBackStep}
+                      data-testid="button-back-to-options"
+                    >
+                      Back
                     </Button>
                   </form>
                 </Form>
